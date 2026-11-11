@@ -12,7 +12,7 @@ fi
 echo "[1/2] Python3 e OK"
 echo "[2/2] Instaliram paketi..."
 python3 -m pip install --quiet --upgrade pip 2>/dev/null || true
-python3 -m pip install --quiet --user requests || pip3 install --quiet requests
+python3 -m pip install --quiet --user requests telethon || pip3 install --quiet requests telethon
 echo
 echo "============================================"
 echo "  Gotovo! Sega pokreni: ./2-start-linux.sh"

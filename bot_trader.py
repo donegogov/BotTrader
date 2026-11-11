@@ -3,29 +3,26 @@
 ================================================================================
   BotTrader — for PremTradingSig
 ================================================================================
-  Follows signals from the Premium Trading Signals channel and trades them
-  on YOUR OWN Bybit / Binance account.
+  Чита сигнали од Telegram каналот (преку ТВОЈОТ Telegram акаунт) и ги
+  тргува на ТВОЈОТ Bybit / Binance акаунт.
 
-  How it works
-  ------------
-  The channel is private, so it can't be read directly by a normal user.
-  Instead, signals are published by the PremTradingSig relay server:
+  ЗОШТО TELEGRAM АКАУНТ?
+  ----------------------
+  Каналот е приватен (само членови можат да го читаат). Оваа програма се
+  најавува со ТВОЈОТ телефонски број (како во Telegram апликацијата) и ги
+  чита пораките како обичен член. Нема сервер, нема API, нема линкови —
+  ништо не знае каде е ботот освен Telegram.
 
-        https://<RELAY_HOST>/api/signals?since=<id>
+  ПРВО ПУШТАЊЕ:
+      python bot_trader.py --login      # најава со телефон (еднаш)
+      python bot_trader.py --setup      # поставки (коини, левериџ, режим)
+      python bot_trader.py              # старт
 
-  This program just polls that URL. It never touches the signal channel,
-  never needs a Telegram token, and never uses anyone else's credentials.
-
-  You only enter YOUR OWN exchange API keys (for live trading).
-
-  Quick start
-  -----------
-      python bot_trader.py --setup     # first-time wizard
-      python bot_trader.py             # run in paper mode (default)
-      python bot_trader.py --status    # what is open right now
-
-  Everything about positions lives in memory only — nothing is written to
-  disk except config.json (created by --setup).
+  КОМАНДИ:
+      --login    најава / проверка на Telegram сесија
+      --setup    поставки (exchange, coins, leverage, paper/live)
+      --status   што е отворено сега
+      --logout   избриши ја Telegram сесијата
 ================================================================================
 """
 
@@ -33,30 +30,44 @@ import os
 import sys
 import json
 import time
+import asyncio
 import argparse
 import hashlib
 import hmac
-import shutil
 import urllib.parse
 from datetime import datetime, timezone
-from typing import Optional, Dict, List
+from typing import Optional, List, Dict
 
 try:
     import requests
 except ImportError:
-    print("\n  Missing package: requests")
-    print("  Install with:  pip install requests\n")
+    print("\n  ❌ Недостасува пакет: requests")
+    print("  Инсталирај:  pip install requests telethon\n")
+    sys.exit(1)
+
+try:
+    from telethon import TelegramClient, events
+    from telethon.tl.types import Channel, Chat
+    from telethon.errors import SessionPasswordNeededError
+except ImportError:
+    print("\n  ❌ Недостасува пакет: telethon")
+    print("  Инсталирај:  pip install telethon\n")
     sys.exit(1)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+SESSION_PATH = os.path.join(BASE_DIR, "telegram_session")
+
+# Публични Telegram API credentials (исти за сите апарати, не се тајни)
+TG_API_ID = 2040
+TG_API_HASH = "b18441a1ff607e10a989891a5462e627"
 
 DEFAULT_CONFIG = {
-    "relay_url": "https://signals.premtradingsig.com",
-    "exchange": "bybit",              # bybit | binance
-    "mode": "paper",                  # paper | live
+    "channel": "@premtradsignal",
+    "exchange": "bybit",
+    "mode": "paper",
     "leverage": 10,
-    "coins": ["SOL", "BNB", "TRX"],   # any of the supported coins
+    "coins": ["SOL", "BNB", "TRX"],
     "max_positions": 4,
     "bybit_api_key": "",
     "bybit_api_secret": "",
@@ -83,105 +94,125 @@ def load_config() -> dict:
     return {**DEFAULT_CONFIG, **cfg}
 
 
-def save_config(cfg: dict):
+def save_config(cfg):
     with open(CONFIG_PATH, "w") as f:
         json.dump(cfg, f, indent=2)
 
 
-def ask(question, default=""):
-    suffix = f" [{default}]" if default else ""
+def ask(q, default=""):
+    s = f" [{default}]" if default else ""
     try:
-        v = input(f"{question}{suffix}: ").strip()
+        v = input(f"{q}{s}: ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
         sys.exit(0)
     return v or default
 
 
-def setup_wizard():
+# ══════════════════════════════════════════════════════════════════════════
+#  TELEGRAM LOGIN
+# ══════════════════════════════════════════════════════════════════════════
+async def telegram_login():
+    """Interactive login with phone + code (saves session file)."""
     print("\n" + "=" * 64)
-    print("  BotTrader — first-time setup")
+    print("  Telegram најава")
     print("=" * 64)
     print("""
-  This wizard will create config.json.
-  Press ENTER to accept the default value shown in brackets.
+  Ќе се најавиш со ТВОЈОТ телефонски број — истиот што го користиш
+  во Telegram апликацијата. Кодот ќе ти дојде во Telegram, не SMS.
+
+  ⚠️  Ова е твојот личен акаунт. Програмата само ГИ ЧИТА пораките
+      од каналот. Не праќа ништо, не ги менува твоите контакти.
 """)
+    phone = ask("  Телефонски број (со +389...)", "")
+    if not phone:
+        print("  ❌ Откажано")
+        return False
 
-    cfg = dict(DEFAULT_CONFIG)
+    client = TelegramClient(SESSION_PATH, TG_API_ID, TG_API_HASH)
+    await client.connect()
 
-    print("\n[1/4] Relay address (provided by PremTradingSig)")
-    url = ask("      Relay URL", cfg["relay_url"])
-    cfg["relay_url"] = url.rstrip("/")
+    if await client.is_user_authorized():
+        me = await client.get_me()
+        print(f"\n  ✅ Веќе најавен како: {me.first_name or ''} (@{me.username or me.phone})")
+        await client.disconnect()
+        return True
 
-    print("\n[2/4] Exchange")
-    print("      1) Bybit   2) Binance")
-    ex = ask("      Choose (1/2)", "1")
-    cfg["exchange"] = "binance" if ex.strip() == "2" else "bybit"
-
-    print("\n[3/4] Coins to trade")
-    print(f"      Supported: {', '.join(COIN_CHOICES)}")
-    print("      Example: SOL,BNB,TRX")
-    coins = ask("      Coins", ",".join(cfg["coins"]))
-    cfg["coins"] = [c.strip().upper() for c in coins.split(",") if c.strip()]
-
-    lev = ask("      Leverage (10 recommended)", str(cfg["leverage"]))
     try:
-        cfg["leverage"] = int(lev)
-    except ValueError:
-        cfg["leverage"] = 10
+        await client.send_code_request(phone)
+        code = ask("  Код од Telegram", "")
+        if not code:
+            print("  ❌ Откажано")
+            await client.disconnect()
+            return False
+        try:
+            await client.sign_in(phone, code)
+        except SessionPasswordNeededError:
+            pwd = ask("  Двофакторска лозинка (2FA)")
+            await client.sign_in(password=pwd)
 
-    print("\n[4/4] Trading mode")
-    print("      1) PAPER — simulate, no real money (recommended first)")
-    print("      2) LIVE  — real money on your exchange account")
-    m = ask("      Choose (1/2)", "1")
-    cfg["mode"] = "live" if m.strip() == "2" else "paper"
-
-    if cfg["mode"] == "live":
-        print("\n  Enter your OWN API keys (keep them private!)")
-        print("  Create them in the exchange dashboard: Read + Trade, no Withdraw.")
-        if cfg["exchange"] == "bybit":
-            cfg["bybit_api_key"] = ask("      Bybit API key")
-            cfg["bybit_api_secret"] = ask("      Bybit API secret")
-        else:
-            cfg["binance_api_key"] = ask("      Binance API key")
-            cfg["binance_api_secret"] = ask("      Binance API secret")
-
-    save_config(cfg)
-    print("\n  ✅ Saved to config.json")
-    print("  Start trading with:  python bot_trader.py\n")
-
-
-# ══════════════════════════════════════════════════════════════════════════
-#  RELAY
-# ══════════════════════════════════════════════════════════════════════════
-def fetch_signals(relay_url: str, since_id: int) -> List[dict]:
-    try:
-        r = requests.get(f"{relay_url}/api/signals",
-                         params={"since": since_id}, timeout=15)
-        if r.status_code != 200:
-            print(f"  [relay] HTTP {r.status_code}")
-            return []
-        data = r.json()
-        return data.get("signals", [])
+        me = await client.get_me()
+        print(f"\n  ✅ Најавен како: {me.first_name or ''} (@{me.username or me.phone})")
+        await client.disconnect()
+        return True
     except Exception as e:
-        print(f"  [relay] error: {e}")
-        return []
-
-
-def check_relay(relay_url: str) -> bool:
-    try:
-        r = requests.get(f"{relay_url}/health", timeout=10)
-        return r.status_code == 200
-    except Exception:
+        print(f"\n  ❌ Најава не успеа: {e}")
+        await client.disconnect()
         return False
 
 
+async def telegram_logout():
+    if not os.path.exists(SESSION_PATH + ".session"):
+        print("  Нема активна сесија")
+        return
+    client = TelegramClient(SESSION_PATH, TG_API_ID, TG_API_HASH)
+    await client.connect()
+    try:
+        await client.log_out()
+        print("  ✅ Одјавен. Сесијата е избришана.")
+    except Exception as e:
+        print(f"  ⚠️ {e}")
+    await client.disconnect()
+    try:
+        os.remove(SESSION_PATH + ".session")
+    except Exception:
+        pass
+
+
+def has_session() -> bool:
+    return os.path.exists(SESSION_PATH + ".session")
+
+
 # ══════════════════════════════════════════════════════════════════════════
-#  EXCHANGE (Bybit + Binance, minimal)
+#  SIGNAL PARSING
+# ══════════════════════════════════════════════════════════════════════════
+def parse_signal(text: str) -> Optional[dict]:
+    if not text or "#signal" not in text:
+        return None
+    try:
+        start = text.index("{", text.index("#signal"))
+        depth = 0
+        end = start
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        data = json.loads(text[start:end])
+        if "signal" in data and "symbol" in data:
+            return data
+    except Exception:
+        return None
+    return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  EXCHANGES
 # ══════════════════════════════════════════════════════════════════════════
 class BaseExchange:
-    name = "base"
-
     def __init__(self, cfg):
         self.cfg = cfg
         self._instr = {}
@@ -204,9 +235,7 @@ class BaseExchange:
             qty = (inst["min_notional"] * 1.2) / price
             qty = round(qty / step) * step
         qty = max(qty, inst["min_qty"])
-        if step >= 1:
-            return int(round(qty))
-        return round(qty, 8)
+        return int(round(qty)) if step >= 1 else round(qty, 8)
 
 
 class BybitX(BaseExchange):
@@ -241,11 +270,11 @@ class BybitX(BaseExchange):
             r = requests.get(self.base + "/v5/market/instruments-info",
                              params={"category": "linear", "symbol": symbol}, timeout=10)
             it = r.json()["result"]["list"][0]
-            cfg = {"min_qty": float(it["lotSizeFilter"]["minOrderQty"]),
-                   "step": float(it["lotSizeFilter"]["qtyStep"]),
-                   "min_notional": float(it["lotSizeFilter"].get("minNotionalValue", 5) or 5)}
-            self._instr[symbol] = cfg
-            return cfg
+            self._instr[symbol] = {
+                "min_qty": float(it["lotSizeFilter"]["minOrderQty"]),
+                "step": float(it["lotSizeFilter"]["qtyStep"]),
+                "min_notional": float(it["lotSizeFilter"].get("minNotionalValue", 5) or 5)}
+            return self._instr[symbol]
         except Exception:
             return None
 
@@ -334,11 +363,11 @@ class BinanceX(BaseExchange):
             for s in r.json()["symbols"]:
                 if s["symbol"] == symbol:
                     f = {x["filterType"]: x for x in s["filters"]}
-                    cfg = {"min_qty": float(f["LOT_SIZE"]["minQty"]),
-                           "step": float(f["LOT_SIZE"]["stepSize"]),
-                           "min_notional": float((f.get("MIN_NOTIONAL") or {}).get("notional", 5.0))}
-                    self._instr[symbol] = cfg
-                    return cfg
+                    self._instr[symbol] = {
+                        "min_qty": float(f["LOT_SIZE"]["minQty"]),
+                        "step": float(f["LOT_SIZE"]["stepSize"]),
+                        "min_notional": float((f.get("MIN_NOTIONAL") or {}).get("notional", 5.0))}
+                    return self._instr[symbol]
         except Exception:
             return None
         return None
@@ -383,7 +412,7 @@ class BinanceX(BaseExchange):
 
     def balance(self):
         r = self._sign("GET", "/fapi/v2/account", {})
-        return float(r.get("totalWalletBalance", 0)) if "totalWalletBalance" in r else None
+        return float(r["totalWalletBalance"]) if "totalWalletBalance" in r else None
 
     def open_positions(self):
         out = {}
@@ -407,53 +436,51 @@ def make_exchange(cfg):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  TRADER (in-memory only)
+#  TRADER
 # ══════════════════════════════════════════════════════════════════════════
 class Trader:
     def __init__(self, cfg):
         self.cfg = cfg
         self.ex = make_exchange(cfg)
-        self.positions = {}          # in-memory: symbol -> dict
-        self.last_signal_id = 0
-        self.processed = set()
-        self.started = datetime.now(timezone.utc)
+        self.positions: Dict[str, dict] = {}
+        self.seen: set = set()
 
-    # ── display ────────────────────────────────────────────────────────
     def banner(self):
         c = self.cfg
         print("=" * 64)
         print(f"  BotTrader — {c['exchange'].upper()} — {c['mode'].upper()} — {c['leverage']}x")
         print("=" * 64)
-        print(f"  Relay   : {c['relay_url']}")
-        print(f"  Coins   : {', '.join(c['coins']) if c['coins'] else '(none)'}")
-        print(f"  Max pos : {c['max_positions']}")
+        print(f"  Канал    : {c['channel']}")
+        print(f"  Коини    : {', '.join(c['coins']) if c['coins'] else '(нема)'}")
+        print(f"  Max pos  : {c['max_positions']}")
         if c["mode"] == "live":
-            keys = c.get(f"{c['exchange']}_api_key", "")
-            print(f"  API keys: {'set' if keys else 'MISSING'}")
+            k = c.get(f"{c['exchange']}_api_key", "")
+            print(f"  API keys : {'✅ set' if k else '❌ MISSING'}")
         print("=" * 64)
 
-    def status(self):
-        now = datetime.now().strftime("%H:%M:%S")
-        print(f"\n  [{now}] ── status ──")
+    def show_status(self):
+        t = datetime.now().strftime("%H:%M:%S")
+        print(f"\n  [{t}] ── статус ──")
         if self.positions:
             for sym, p in self.positions.items():
                 print(f"    {sym:9s} {p['side']:5s} {p['qty']} @ {p['entry']:.6f} "
                       f"SL {p['sl']:.6f} TP {p['tp']:.6f}")
         else:
-            print("    (no open positions)")
+            print("    (нема отворени позиции)")
         if self.cfg["mode"] == "live":
-            bal = self.ex.balance()
-            if bal is not None:
-                print(f"    balance: ${bal:.2f}")
+            b = self.ex.balance()
+            if b is not None:
+                print(f"    баланс: ${b:.2f}")
         print()
 
-    # ── trading ────────────────────────────────────────────────────────
-    def handle(self, sig):
+    def on_signal(self, sig: dict):
         symbol = sig.get("symbol", "")
         coin = symbol.replace("USDT", "")
         if coin not in self.cfg["coins"]:
+            print(f"  [филтер] {symbol} не е во листата")
             return
         action = sig.get("signal", "")
+        print(f"  [сигнал] {action} {symbol} @ {sig.get('price')}")
         if "OPEN" in action:
             self.open(sig)
         elif "CLOSE" in action:
@@ -464,11 +491,9 @@ class Trader:
         if symbol in self.positions:
             return
         if len(self.positions) >= self.cfg["max_positions"]:
-            print(f"  [limit] max {self.cfg['max_positions']} positions")
+            print(f"  [лимит] макс {self.cfg['max_positions']} позиции")
             return
-        price = float(sig["price"])
-        sl_pct = float(sig["sl_pct"])
-        tp_pct = float(sig["tp_pct"])
+        price = float(sig["price"]); sl_pct = float(sig["sl_pct"]); tp_pct = float(sig["tp_pct"])
         lev = int(sig.get("leverage", self.cfg["leverage"]))
         is_long = "LONG" in sig["signal"]
         side = "Buy" if is_long else "Sell"
@@ -476,20 +501,18 @@ class Trader:
         tp = price * (1 + tp_pct) if is_long else price * (1 - tp_pct)
         qty = self.ex.size_for(symbol, price)
         if qty <= 0:
-            print(f"  [{symbol}] cannot size")
+            print(f"  ❌ {symbol}: не можам да пресметам големина")
             return
-
         if self.cfg["mode"] == "live":
             self.ex.set_leverage(symbol, lev)
             res = self.ex.market_order(symbol, side, qty, sl, tp, lev)
             if "error" in res:
-                print(f"  ❌ {symbol} {side} rejected: {res['error']}")
+                print(f"  ❌ {symbol} {side} одбиено: {res['error']}")
                 return
             print(f"  ✅ LIVE {symbol} {side} qty={qty} SL={sl:.6f} TP={tp:.6f}")
         else:
             print(f"  🚀 PAPER {symbol} {'LONG' if is_long else 'SHORT'} "
                   f"qty={qty} @ {price:.4f} SL={sl:.4f} TP={tp:.4f}")
-
         self.positions[symbol] = {"side": "LONG" if is_long else "SHORT",
                                   "qty": qty, "entry": price, "sl": sl, "tp": tp}
 
@@ -497,61 +520,119 @@ class Trader:
         symbol = sig["symbol"]
         if symbol not in self.positions:
             return
-        pos = self.positions[symbol]
+        p = self.positions[symbol]
         if self.cfg["mode"] == "live":
-            res = self.ex.close(symbol, pos["qty"])
+            res = self.ex.close(symbol, p["qty"])
             if "error" in res:
-                print(f"  ❌ close {symbol}: {res['error']}")
+                print(f"  ❌ затворање {symbol}: {res['error']}")
                 return
-            print(f"  ✅ LIVE closed {symbol} ({sig['signal']})")
+            print(f"  ✅ LIVE затворено {symbol} ({sig['signal']})")
         else:
-            print(f"  📉 PAPER closed {symbol} ({sig['signal']}) @ {sig.get('price')}")
+            print(f"  📉 PAPER затворено {symbol} ({sig['signal']}) @ {sig.get('price')}")
         del self.positions[symbol]
 
-    # ── loop ───────────────────────────────────────────────────────────
-    def run(self):
-        self.banner()
-        if not check_relay(self.cfg["relay_url"]):
-            print(f"\n  ⚠️  Relay not reachable: {self.cfg['relay_url']}")
-            print("     Check your internet, or the relay is down.\n")
-        if self.cfg["mode"] == "live":
-            bal = self.ex.balance()
-            print(f"  balance: ${bal:.2f}" if bal is not None
-                  else "  ⚠️  cannot read balance — check API keys")
-        print("\n  Listening for signals... (Ctrl+C to stop)\n")
 
-        last_status = 0
-        while True:
-            try:
-                signals = fetch_signals(self.cfg["relay_url"], self.last_signal_id)
-                for s in signals:
-                    sid = s.get("id", 0)
-                    if sid in self.processed:
-                        continue
-                    self.processed.add(sid)
-                    self.last_signal_id = max(self.last_signal_id, sid)
-                    print(f"  [signal] {s.get('signal')} {s.get('symbol')} @ {s.get('price')}")
-                    self.handle(s)
-                if time.time() - last_status > 60:
-                    self.status()
-                    last_status = time.time()
-                time.sleep(5)
-            except KeyboardInterrupt:
-                print("\n  stopped")
-                break
-            except Exception as e:
-                print(f"  [error] {e}")
-                time.sleep(5)
+# ══════════════════════════════════════════════════════════════════════════
+#  SETUP WIZARD
+# ══════════════════════════════════════════════════════════════════════════
+def setup_wizard():
+    cfg = load_config() or dict(DEFAULT_CONFIG)
+    print("\n" + "=" * 64)
+    print("  BotTrader — поставки")
+    print("=" * 64)
+    print("  Притисни ENTER за да ја прифатиш вредноста во загради.\n")
+
+    cfg["channel"] = ask("  Telegram канал", cfg["channel"])
+
+    print("\n  Берза:  1) Bybit   2) Binance")
+    ex = ask("  Избери (1/2)", "1" if cfg["exchange"] == "bybit" else "2")
+    cfg["exchange"] = "binance" if ex.strip() == "2" else "bybit"
+
+    print(f"\n  Достапни коини: {', '.join(COIN_CHOICES)}")
+    print("  Пример: SOL,BNB,TRX")
+    coins = ask("  Коини", ",".join(cfg["coins"]))
+    cfg["coins"] = [c.strip().upper() for c in coins.split(",") if c.strip()]
+
+    try:
+        cfg["leverage"] = int(ask("  Левериџ (10 препорачано)", str(cfg["leverage"])))
+    except ValueError:
+        cfg["leverage"] = 10
+
+    print("\n  Режим:")
+    print("    1) PAPER — симулација (без пари) — препорачано прво")
+    print("    2) LIVE  — реални пари")
+    m = ask("  Избери (1/2)", "1" if cfg["mode"] == "paper" else "2")
+    cfg["mode"] = "live" if m.strip() == "2" else "paper"
+
+    if cfg["mode"] == "live":
+        print("\n  Внеси ГИ ТВОИТЕ API клучеви (не ги споделувај со никого)")
+        print("  Дозволи: Read + Trade, БЕЗ Withdraw")
+        if cfg["exchange"] == "bybit":
+            cfg["bybit_api_key"] = ask("  Bybit API key", cfg.get("bybit_api_key", ""))
+            cfg["bybit_api_secret"] = ask("  Bybit API secret", cfg.get("bybit_api_secret", ""))
+        else:
+            cfg["binance_api_key"] = ask("  Binance API key", cfg.get("binance_api_key", ""))
+            cfg["binance_api_secret"] = ask("  Binance API secret", cfg.get("binance_api_secret", ""))
+
+    save_config(cfg)
+    print("\n  ✅ Зачувано во config.json")
+    print("  Старт:  python bot_trader.py\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ══════════════════════════════════════════════════════════════════════════
+async def run_trader(cfg):
+    trader = Trader(cfg)
+    trader.banner()
+
+    client = TelegramClient(SESSION_PATH, TG_API_ID, TG_API_HASH)
+    await client.start()
+    me = await client.get_me()
+    print(f"  Најавен како: {me.first_name or ''} (@{me.username or me.phone})\n")
+
+    if cfg["mode"] == "live":
+        b = trader.ex.balance()
+        print(f"  баланс: ${b:.2f}" if b is not None
+              else "  ⚠️ не можам да го прочитам балансот (провери API клучеви)")
+
+    @client.on(events.NewMessage(chats=cfg["channel"]))
+    async def handler(event):
+        text = event.message.message or ""
+        sig = parse_signal(text)
+        if sig:
+            trader.on_signal(sig)
+            trader.show_status()
+
+    print(f"  👂 Слушам сигнали во {cfg['channel']}... (Ctrl+C за стоп)\n")
+
+    # periodic status
+    async def heartbeat():
+        while True:
+            await asyncio.sleep(300)
+            trader.show_status()
+
+    asyncio.ensure_future(heartbeat())
+    await client.run_until_disconnected()
+
+
 def main():
     ap = argparse.ArgumentParser(description="BotTrader for PremTradingSig")
-    ap.add_argument("--setup", action="store_true", help="first-time setup wizard")
-    ap.add_argument("--status", action="store_true", help="show live status")
+    ap.add_argument("--login", action="store_true", help="најава со Telegram телефон")
+    ap.add_argument("--logout", action="store_true", help="избриши Telegram сесија")
+    ap.add_argument("--setup", action="store_true", help="поставки")
+    ap.add_argument("--status", action="store_true", help="преглед на позиции")
     args = ap.parse_args()
+
+    if args.logout:
+        asyncio.run(telegram_logout())
+        return
+
+    if args.login:
+        ok = asyncio.run(telegram_login())
+        if ok:
+            print("\n  Следно:  python bot_trader.py --setup\n")
+        return
 
     if args.setup:
         setup_wizard()
@@ -559,31 +640,30 @@ def main():
 
     cfg = load_config()
     if not cfg:
-        print("\n  No config.json found.")
-        print("  Run first:  python bot_trader.py --setup\n")
+        print("\n  ❌ Нема config.json")
+        print("  1) python bot_trader.py --login")
+        print("  2) python bot_trader.py --setup\n")
         sys.exit(1)
-
-    t = Trader(cfg)
 
     if args.status:
+        t = Trader(cfg)
         t.banner()
-        t.status()
-        if cfg["mode"] == "live":
-            pos = t.ex.open_positions()
-            print("  Exchange positions:")
-            for sym, p in pos.items():
-                print(f"    {sym:9s} {p['side']:5s} {p['size']} @ {p['entry']:.6f} "
-                      f"PnL {p['pnl']:+.2f}")
-            if not pos:
-                print("    (none)")
-        print()
+        t.show_status()
         return
 
-    if cfg["mode"] == "live" and not cfg.get(f"{cfg['exchange']}_api_key"):
-        print("\n  LIVE mode needs API keys. Run --setup again.\n")
+    if not has_session():
+        print("\n  ❌ Нема Telegram сесија. Прво најави се:")
+        print("     python bot_trader.py --login\n")
         sys.exit(1)
 
-    t.run()
+    if cfg["mode"] == "live" and not cfg.get(f"{cfg['exchange']}_api_key"):
+        print("\n  ❌ LIVE режим бара API клучеви. Пушти --setup повторно.\n")
+        sys.exit(1)
+
+    try:
+        asyncio.run(run_trader(cfg))
+    except KeyboardInterrupt:
+        print("\n  стоп")
 
 
 if __name__ == "__main__":

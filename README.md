@@ -2,7 +2,8 @@
 
 **Автоматски ги тргува сигналите од каналот PremTradingSig на твојот Bybit или Binance акаунт.**
 
-Не ти треба никакво програмерско знаење. Само следи ги чекорите подолу.
+Чита директно од **Telegram** — преку твојот сопствен Telegram акаунт.
+Нема сервер, нема API, ништо не е изложено.
 
 ---
 
@@ -12,9 +13,9 @@
 |---|---|
 | Компјутер | Windows, macOS или Linux |
 | Интернет | ✅ |
-| Bybit или Binance акаунт | (за реално тргување) |
-
-**Не треба** ништо да плаќаш, нема скриени трошоци.
+| **Telegram акаунт** | Го имаш веќе (телефон) |
+| **Претплата на каналот** | Мора да си член на PremTradingSig |
+| Bybit или Binance | (само за реално тргување) |
 
 ---
 
@@ -23,147 +24,162 @@
 ## Чекор 1: Симни Python
 
 1. Отвори: **https://www.python.org/downloads/**
-2. Кликни го големото **„Download Python 3.12"** копче
-3. Кога ќе се симне, **кликни два пати** на фајлот
-4. ⚠️ **ВАЖНО:** На првиот екран, **штиклирај го полето**:
+2. Кликни **„Download Python 3.12"**
+3. Отвори го симнатиот фајл (двоен клик)
+4. ⚠️ **ВАЖНО:** На првиот екран штиклирај:
    ```
    ☑ Add python.exe to PATH
    ```
-   *(се наоѓа најдолу, мора да биде штиклирано!)*
-5. Кликни **„Install Now"** и почекај 1-2 минути
+5. Кликни **„Install Now"** и почекај
 6. Кликни **„Close"**
 
-## Чекор 2: Провери дали Python работи
+## Чекор 2: Провери Python
 
-1. Кликни **Start** (кругот долу лево)
-2. Напиши **`cmd`**
-3. Кликни на **„Command Prompt"**
-4. Ќе се отвори црн прозорец. Напиши и притисни ENTER:
+1. **Start** → напиши `cmd` → ENTER
+2. Напиши:
 
 ```bash
 python --version
 ```
 
-Треба да видиш нешто како: `Python 3.12.4`
+Треба да видиш `Python 3.12.x`
 
-> ❌ Ако пишува „python is not recognized" — врати се на Чекор 1 и провери ја штиклираната опција. Потоа рестартирај компјутер.
+> ❌ Ако пишува „not recognized" — врати се на Чекор 1 (провери ја штиклираната опција) и рестартирај компјутер.
 
-## Чекор 3: Симни го BotTrader
+## Чекор 3: Симни BotTrader
 
-1. Отвори: **https://github.com/PremTradingSig/BotTrader** *(линкот ќе го добиеш)*
-2. Кликни го зелениот **„Code"** копче
-3. Кликни **„Download ZIP"**
-4. Отвори ја папката **Downloads** (Симнувања)
-5. Кликни **десен клик** на `BotTrader-main.zip` → **„Extract All"**
-6. Кликни **„Extract"**
+1. Отвори: **https://github.com/PremTradingSig/BotTrader**
+2. Зелено копче **„Code"** → **„Download ZIP"**
+3. Отвори **Downloads**
+4. Десен клик на ZIP → **„Extract All"** → **Extract**
 
-## Чекор 4: Инсталирај потребниот пакет
+## Чекор 4: Инсталирај
 
-1. Отвори ја извадената папка `BotTrader-main`
-2. Кликни на адресната лента горе (каде пишува патеката)
-3. Избриши сè и напиши **`cmd`**, притисни ENTER
-4. Во црниот прозорец напиши:
+1. Отвори ја папката `BotTrader-main`
+2. Кликни на адресната лента (каде е патеката)
+3. Избриши сè, напиши `cmd`, ENTER
+4. Напиши:
 
 ```bash
-pip install requests
+pip install requests telethon
 ```
 
-*(почекај 10 секунди)*
+*(почекај ~20 секунди)*
 
-## Чекор 5: Постави го ботот
+## Чекор 5: Најави се со Telegram
 
-Во истиот црн прозорец напиши:
+```bash
+python bot_trader.py --login
+```
+
+Ќе те праша:
+```
+  Телефонски број (со +389...):
+```
+Напиши го **твојот број** со +389… и ENTER.
+
+Во твојата **Telegram апликација** на телефон ќе ти дојде порака со код (не SMS).
+
+```
+  Код од Telegram: 
+```
+Напиши го кодот и ENTER.
+
+✅ Ќе видиш: `✅ Најавен како: Твоe Име (@username)`
+
+## Чекор 6: Постави го ботот
 
 ```bash
 python bot_trader.py --setup
 ```
 
-Ќе те праша 4 прашања. **Само притискај ENTER** за да ги прифатиш препораките:
+Притискај **ENTER** на сите прашања (прифаќа препорачани вредности):
 
 ```
-[1/4] Relay address (provided by PremTradingSig)
-      Relay URL [https://signals.premtradingsig.com]:     ← ENTER
-
-[2/4] Exchange
-      1) Bybit   2) Binance
-      Choose (1/2) [1]:                                    ← ENTER
-
-[3/4] Coins to trade
-      Supported: BTC, ETH, SOL, BNB, XRP, DOGE, ADA, TRX, ...
-      Example: SOL,BNB,TRX
-      Coins [SOL,BNB,TRX]:                                 ← ENTER
-
-      Leverage (10 recommended) [10]:                      ← ENTER
-
-[4/4] Trading mode
-      1) PAPER — simulate, no real money (recommended first)
-      2) LIVE  — real money on your exchange account
-      Choose (1/2) [1]:                                    ← ENTER (за тест)
+  Telegram канал [@premtradsignal]:        ← ENTER
+  Берза: 1) Bybit  2) Binance
+  Избери (1/2) [1]:                        ← ENTER
+  Коини [SOL,BNB,TRX]:                     ← ENTER
+  Левериџ (10 препорачано) [10]:           ← ENTER
+  Режим: 1) PAPER  2) LIVE
+  Избери (1/2) [1]:                        ← ENTER (за тест)
 ```
 
-✅ **Готово!** Веднаш потоа ќе видиш:
+## Чекор 7: Стартувај
+
+```bash
+python bot_trader.py
+```
+
+✅ Ќе видиш:
 
 ```
 ========================================================================
   BotTrader — BYBIT — PAPER — 10x
 ========================================================================
-  Relay   : https://signals.premtradingsig.com
-  Coins   : SOL, BNB, TRX
-  ...
-  Listening for signals... (Ctrl+C to stop)
+  Канал    : @premtradsignal
+  Коини    : SOL, BNB, TRX
+========================================================================
+  👂 Слушам сигнали во @premtradsignal...
 ```
+
+**Готово!** Ботот работи.
 
 # 🍎 macOS — ЧЕКОР ПО ЧЕКОР
 
-## Чекор 1: Провери дали Python го имаш
+## Чекор 1: Провери Python
 
-1. Кликни **⌘ + Space** (Spotlight)
-2. Напиши **`Terminal`**, притисни ENTER
-3. Во црниот прозорец напиши:
+1. **⌘ + Space** → напиши `Terminal` → ENTER
+2. Напиши:
 
 ```bash
 python3 --version
 ```
 
-> ❌ Ако пишува „command not found" → оди на **https://www.python.org/downloads/macos/**, симни го и инсталирај го (клик-клик-инсталирај).
+> ❌ Ако „command not found" → https://www.python.org/downloads/macos/ → симни → инсталирај
 
-## Чекор 2: Симни го BotTrader
+## Чекор 2: Симни BotTrader
 
-1. Отвори: **https://github.com/PremTradingSig/BotTrader**
-2. Кликни **„Code"** → **„Download ZIP"**
-3. Отвори ја папката **Downloads**
-4. Кликни **два пати** на ZIP-от (сам ќе се отвори)
+1. **https://github.com/PremTradingSig/BotTrader**
+2. **„Code"** → **„Download ZIP"**
+3. Отвори **Downloads** → двоен клик на ZIP
 
-## Чекор 3: Отвори терминал во папката
-
-1. Отвори **Terminal** (⌘ + Space → `Terminal`)
-2. Напиши:
+## Чекор 3: Инсталирај
 
 ```bash
 cd ~/Downloads/BotTrader-main
+pip3 install requests telethon
 ```
 
-## Чекор 4: Инсталирај го пакетот
+## Чекор 4: Најави се
 
 ```bash
-pip3 install requests
+python3 bot_trader.py --login
 ```
 
-## Чекор 5: Постави го ботот
+Внеси телефон (+389…) и код од Telegram.
+
+## Чекор 5: Постави
 
 ```bash
 python3 bot_trader.py --setup
 ```
 
-Притискај **ENTER** на сите прашања (прифаќа препорачани вредности).
+ENTER на сите прашања.
 
-✅ **Готово!** Ботот стартува во PAPER режим.
+## Чекор 6: Стартувај
+
+```bash
+python3 bot_trader.py
+```
+
+✅ Готово!
 
 # 🐧 Linux — ЧЕКОР ПО ЧЕКОР
 
-## Чекор 1: Отвори терминал
+## Чекор 1: Терминал
 
-**Ubuntu/Debian:** `Ctrl + Alt + T`
+`Ctrl + Alt + T`
 
 ## Чекор 2: Провери Python
 
@@ -171,31 +187,41 @@ python3 bot_trader.py --setup
 python3 --version
 ```
 
-> ❌ Ако не го има: `sudo apt update && sudo apt install python3 python3-pip`
+> ❌ Ако го нема: `sudo apt update && sudo apt install -y python3 python3-pip`
 
-## Чекор 3: Симни го
+## Чекор 3: Симни
 
 ```bash
 cd ~
 git clone https://github.com/PremTradingSig/BotTrader.git
+cd BotTrader
 ```
 
-> ❌ Ако не работи (нема git): `sudo apt install git` прво
+> ❌ Ако нема git: `sudo apt install -y git`
 
 ## Чекор 4: Инсталирај
 
 ```bash
-cd BotTrader
-pip3 install requests
+pip3 install requests telethon
 ```
 
-## Чекор 5: Постави го
+## Чекор 5: Најави се
+
+```bash
+python3 bot_trader.py --login
+```
+
+## Чекор 6: Постави
 
 ```bash
 python3 bot_trader.py --setup
 ```
 
-Притискај **ENTER** на сите прашања.
+## Чекор 7: Стартувај
+
+```bash
+python3 bot_trader.py
+```
 
 ---
 
@@ -203,58 +229,60 @@ python3 bot_trader.py --setup
 
 | Што сакаш | Windows | macOS | Linux |
 |---|---|---|---|
-| Прво поставување | `python bot_trader.py --setup` | `python3 bot_trader.py --setup` | `python3 bot_trader.py --setup` |
-| Пушти го ботот | `python bot_trader.py` | `python3 bot_trader.py` | `python3 bot_trader.py` |
-| Види статус | `python bot_trader.py --status` | `python3 bot_trader.py --status` | `python3 bot_trader.py --status` |
+| Најава со Telegram | `python bot_trader.py --login` | `python3 bot_trader.py --login` | `python3 bot_trader.py --login` |
+| Поставки | `python bot_trader.py --setup` | `python3 bot_trader.py --setup` | `python3 bot_trader.py --setup` |
+| Старт | `python bot_trader.py` | `python3 bot_trader.py` | `python3 bot_trader.py` |
+| Статус | `python bot_trader.py --status` | `python3 bot_trader.py --status` | `python3 bot_trader.py --status` |
+| Избриши сесија | `python bot_trader.py --logout` | `python3 bot_trader.py --logout` | `python3 bot_trader.py --logout` |
 | Стоп | `Ctrl + C` | `Ctrl + C` | `Ctrl + C` |
 
 ---
 
-# 🔑 Како да преминеш на РЕАЛНО тргување
+# 🔑 Премин на РЕАЛНО тргување
 
-Само кога ќе си сигурен (прво пробај 1-2 дена PAPER).
+Само откако ќе тестираш во PAPER 1-2 дена.
 
-## 1. Направи API клуч на твојата берза
+## 1. API клуч на твојата берза
 
 ### Bybit
-1. Оди на **bybit.com** → најави се
-2. Кликни **профил** (горе десно) → **„API"** (или „API Management")
-3. Кликни **„Create New Key"**
-4. Тип: **„System-generated API Keys"**
-5. Дозволи: **☑ Read-Write** *(ТРЕБА да биде*) / **☐ Withdraw** *(НЕ штиклирај!)*
-6. Кликни **„Submit"**, внеси код од телефон
-7. **Копирај ги** API Key и API Secret (Secret се покажува само еднаш!)
+1. **bybit.com** → најава → **профил** (горе десно) → **„API"**
+2. **„Create New Key"** → **„System-generated API Keys"**
+3. Дозволи:
+   - ☑ **Read-Write** (мора)
+   - ☐ **Withdraw** (НЕ стиклирај!)
+4. **Submit** → внеси код од телефон
+5. **Копирај** API Key + API Secret (Secret се покажува само еднаш)
 
 ### Binance
 1. **binance.com** → **профил** → **„API Management"**
-2. Кликни **„Create API"** → **„System generated"**
-3. Име: `BotTrader`
-4. Кликни **„Edit restrictions"**:
-   - **☑ Enable Futures** ← важно!
-   - **☑ Enable Reading**
-   - **☐ Enable Withdrawals** ← НЕ
-5. Спаси → копирај Key и Secret
+2. **„Create API"** → **„System generated"**
+3. Име: `BotTrader` → **„Edit restrictions"**:
+   - ☑ **Enable Futures** ← мора!
+   - ☑ **Enable Reading**
+   - ☐ **Enable Withdrawals** ← НЕ
+4. Зачувај → копирај Key + Secret
 
-## 2. Премини на LIVE
+## 2. Внеси ги во ботот
 
 ```bash
-python bot_trader.py --setup
+python3 bot_trader.py --setup
 ```
 
-- Кај **mode** избери **`2`** (LIVE)
-- Внеси ги API key и secret
+- Кај **Режим** избери **`2`** (LIVE)
+- Внеси API key + secret
 
-✅ Ќе почнеш да тргуваш реално.
+✅ Почињ тргување.
 
 ---
 
-# 🧠 Како работи (во 3 реда)
+# 🧠 Како работи
 
-1. Каналот е приватен → сигналите ги сервира relay серверот на PremTradingSig
-2. Ботот на секои 5 секунди проверува дали има нов сигнал
-3. Ако има: праќа нарачка на твојот акаунт (со твоите пари, твојот акаунт)
+1. Ботот се најавува **со твојот Telegram акаунт** (еднаш, се памти)
+2. Слуша пораки во каналот **како обичен член** — преку Telegram, не API
+3. Кога ќе дојде сигнал: праќа нарачка на **твојот** акаунт
 
-**Твоите API клучеви НЕ се праќаат никаде** — остануваат само на твојот компјутер (во `config.json`).
+**Твоите API клучеви остануваат само на твојот компјутер.**
+**Никој не знае каде е ботот освен Telegram.**
 
 ---
 
@@ -262,11 +290,11 @@ python bot_trader.py --setup
 
 | Проблем | Решение |
 |---|---|
-| „python is not recognized" (Windows) | Реинсталирај Python и штиклирај „Add to PATH" |
-| „pip is not recognized" | Пробај `python -m pip install requests` |
-| „No config.json found" | Прво пушти `--setup` |
-| „Relay not reachable" | Провери интернет. Ако сè уште не работи, кажи на @PremTradingSig |
-| „❌ ... rejected" во live | Провери API дозволи (треба Read-Write + Futures) |
+| „python is not recognized" | Реинсталирај Python, штиклирај „Add to PATH" |
+| „pip is not recognized" | Пробај `python -m pip install requests telethon` |
+| „Нема Telegram сесија" | Прво `--login` |
+| „Cannot find the channel" | Провери дали си член на @premtradsignal |
+| „Режим LIVE бара API клучеви" | Пушти `--setup` и избери 2, внеси клучеви |
 | Ништо не се случува | Нормално — ботот чека сигнал. Сигналите доаѓаат ретко. |
 
 ---
@@ -276,17 +304,17 @@ python bot_trader.py --setup
 | Фајл | Што е |
 |---|---|
 | `bot_trader.py` | Главната програма |
-| `config.json` | Твоите поставки (се креира при --setup) |
-
-Нема ништо друго да чепкаш.
+| `config.json` | Твоите поставки (креира се со `--setup`) |
+| `telegram_session.session` | Најава на Telegram (креира се со `--login`) |
 
 ---
 
 # ⚠️ ВАЖНО
 
-- **Прво PAPER** — барем 1-2 дена, за да видиш како работи.
+- **Прво PAPER** — 1-2 дена пред реални пари.
 - **API без Withdraw** — секогаш.
-- **Leverage 10x** — не менувај (20x е опасно: SL 5% = 100% загуба).
-- **Не ги споделувај API Secret** со никого.
+- **Leverage 10x** — 20x е опасно (SL 5% = цела марџа).
+- **Не ширете API Secret** со никого.
+- Ако сакаш да се одјавиш од ботот: `--logout` (брише сесијата).
 
-Сè најдобро, и среќно тргување! 🚀
+Срекно тргување! 🚀

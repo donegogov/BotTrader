@@ -20,7 +20,7 @@ if errorlevel 1 (
 echo [1/2] Python e OK
 echo [2/2] Instaliram paketi...
 python -m pip install --quiet --upgrade pip
-python -m pip install --quiet requests
+python -m pip install --quiet requests telethon
 
 echo.
 echo ============================================
