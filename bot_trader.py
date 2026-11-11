@@ -666,12 +666,46 @@ async def run_trader(cfg):
     await client.run_until_disconnected()
 
 
+def run_test_signal(cfg):
+    """Offline paper test — feed a fake LONG_OPEN + CLOSE and show results."""
+    t = Trader(cfg)
+    t.banner()
+    print("  🧪 ТЕСТ СИГНАЛ (не бара Telegram најава)\n")
+
+    coin = cfg["coins"][0] if cfg["coins"] else "SOL"
+    symbol = f"{coin}USDT"
+    price = t.ex.price(symbol)
+    if price is None:
+        print(f"  ⚠️ не можам да прочитам цена за {symbol} — користам примерна 100.0")
+        price = 100.0
+    else:
+        print(f"  цена {symbol}: {price}")
+
+    open_sig = {"signal": "LONG_OPEN", "symbol": symbol, "price": price,
+                "sl_pct": 0.05, "tp_pct": 0.10, "leverage": cfg["leverage"]}
+    print("\n  ── 1) OPEN LONG ──")
+    t.on_signal(open_sig)
+    t.show_status()
+
+    close_price = round(price * 0.97, 8)
+    close_sig = {"signal": "LONG_CLOSE_SL", "symbol": symbol, "price": close_price,
+                 "sl_pct": 0.05, "tp_pct": 0.10, "leverage": cfg["leverage"]}
+    print(f"  ── 2) CLOSE LONG @ {close_price} (−3%) ──")
+    t.on_signal(close_sig)
+    t.show_status()
+
+    print("  ✅ Тестот заврши. (`OPEN` + `CLOSE` горе = paper логиката работи)\n")
+    print("  Следно за вистински сигнали:")
+    print("     python bot_trader.py --login\n")
+
+
 def main():
     ap = argparse.ArgumentParser(description="BotTrader for PremTradingSig")
     ap.add_argument("--login", action="store_true", help="најава со Telegram телефон")
     ap.add_argument("--logout", action="store_true", help="избриши Telegram сесија")
     ap.add_argument("--setup", action="store_true", help="поставки")
     ap.add_argument("--status", action="store_true", help="преглед на позиции")
+    ap.add_argument("--test-signal", action="store_true", help="offline тест на paper логика")
     args = ap.parse_args()
 
     if args.logout:
@@ -699,6 +733,10 @@ def main():
         t = Trader(cfg)
         t.banner()
         t.show_status()
+        return
+
+    if args.test_signal:
+        run_test_signal(cfg)
         return
 
     if not has_session():
