@@ -72,6 +72,8 @@ TG_API_HASH = "b18441a1ff607e10a989891a5462e627"
 
 DEFAULT_CONFIG = {
     "channel": "@premtradsignal",
+    "tg_api_id": 0,
+    "tg_api_hash": "",
     "exchange": "bybit",
     "mode": "paper",
     "leverage": 10,
@@ -136,18 +138,131 @@ def phone_looks_valid(p: str) -> bool:
     return p.startswith("+") and p[1:].isdigit() and 8 <= len(p[1:]) <= 15
 
 
+
+def get_tg_creds():
+    """API credentials — optional override from config.json (tg_api_id/tg_api_hash)."""
+    try:
+        cfg = load_config()
+        return (int(cfg.get("tg_api_id") or TG_API_ID),
+                str(cfg.get("tg_api_hash") or TG_API_HASH))
+    except Exception:
+        return TG_API_ID, TG_API_HASH
+
+
+def render_qr(url: str):
+    """Draw a scannable QR code in the terminal."""
+    try:
+        import qrcode
+        q = qrcode.QRCode(border=2, box_size=1)
+        q.add_data(url)
+        q.make(fit=True)
+        q.print_ascii(invert=True)
+        return True
+    except ImportError:
+        print("\n  ⚠️  Недостасува пакетот 'qrcode'.")
+        print("     Инсталирај:  pip install qrcode\n")
+        print(f"  Или отвори го овој линк на телефон:\n  {url}\n")
+        return False
+    except Exception as e:
+        print(f"  ⚠️ QR рендер: {e}")
+        print(f"  Линк: {url}")
+        return False
+
+
+async def login_with_qr():
+    """Login by scanning a QR with the Telegram app (no codes needed)."""
+    api_id, api_hash = get_tg_creds()
+    client = TelegramClient(SESSION_PATH, api_id, api_hash)
+    await client.connect()
+
+    if await client.is_user_authorized():
+        me = await client.get_me()
+        print(f"  ✅ Веќе најавен како: {me.first_name or ''} (@{me.username or me.phone})")
+        await client.disconnect()
+        return True
+
+    print("""
+  📱 НАЈАВА СО QR КОД
+
+  1. Отвори Telegram на телефон (со твојот број)
+  2. Settings (Поставки) → Devices (Уреди)
+  3. „Link Desktop Device" (Поврзи уред)
+  4. Скенирај го QR кодот подолу 👇
+""")
+
+    deadline = time.time() + 240   # 4 минути
+    qr = await client.qr_login()
+    render_qr(qr.url)
+
+    while time.time() < deadline:
+        try:
+            await qr.wait(timeout=25)
+            # успешно скенирано
+            try:
+                me = await client.get_me()
+                print(f"\n  ✅ Најавен како: {me.first_name or ''} (@{me.username or me.phone})")
+            except Exception:
+                print("\n  ✅ Најавен.")
+            await client.disconnect()
+            return True
+        except asyncio.TimeoutError:
+            # QR истече — нов
+            print("\n  ⏳ QR истече, нов код...\n")
+            try:
+                qr = await client.qr_login()
+                render_qr(qr.url)
+            except Exception as e:
+                print(f"  ❌ {e}")
+                await client.disconnect()
+                return False
+        except SessionPasswordNeededError:
+            print("\n  🔐 Имаш 2FA.")
+            pwd = ask("  Твојата Telegram лозинка", "")
+            try:
+                await client.sign_in(password=pwd)
+                print("\n  ✅ Најавен.")
+                await client.disconnect()
+                return True
+            except Exception as e:
+                print(f"  ❌ {e}")
+                await client.disconnect()
+                return False
+        except Exception as e:
+            print(f"\n  ❌ {type(e).__name__}: {e}")
+            await client.disconnect()
+            return False
+
+    print("\n  ⏱ Времето истече. Пушти --login повторно.\n")
+    await client.disconnect()
+    return False
+
+
 async def telegram_login():
-    """Interactive login with phone + code (saves session file)."""
+    """Interactive login — QR (default) or phone + code."""
     print("\n" + "=" * 64)
     print("  Telegram најава")
     print("=" * 64)
     print("""
-  Ќе се најавиш со ТВОЈОТ телефонски број — истиот што го користиш
-  во Telegram апликацијата.
+  Како сакаш да се најавиш?
+
+    1) 📱 QR КОД  — скенираш со телефон (најлесно, без кодови)
+    2) ☎️  ТЕЛЕФОН + КОД — ако QR не работи
+""")
+    choice = ask("  Избери (1/2)", "1").strip()
+
+    if choice == "2":
+        return await login_phone_code()
+    return await login_with_qr()
+
+
+async def login_phone_code():
+    """Login with phone number + code."""
+    print("""
+  Ќе се најавиш со ТВОЈОТ телефонски број.
 
   Внеси го бројот СО државен код, на пример:
-      +49 1512 3456789     (Germany)
-      +389 70 123 456      (Macedonia)
+      +49 1512 3456789     (Germany — БЕЗ водечка 0!)
+      +389 70 123 456      (Macedonia — БЕЗ водечка 0!)
 
   ✔ Празни места и цртички се дозволени — програмата ги брише.
   ✔ Мора да почнува со '+' .
@@ -171,7 +286,8 @@ async def telegram_login():
     print(f"\n  📱 Број: {phone}")
     print("     Ако е погрешен, притисни Ctrl+C сега и почни повторно.\n")
 
-    client = TelegramClient(SESSION_PATH, TG_API_ID, TG_API_HASH)
+    api_id, api_hash = get_tg_creds()
+    client = TelegramClient(SESSION_PATH, api_id, api_hash)
     await client.connect()
 
     if await client.is_user_authorized():
@@ -268,7 +384,8 @@ async def telegram_logout():
     if not os.path.exists(SESSION_PATH + ".session"):
         print("  Нема активна сесија")
         return
-    client = TelegramClient(SESSION_PATH, TG_API_ID, TG_API_HASH)
+    api_id, api_hash = get_tg_creds()
+    client = TelegramClient(SESSION_PATH, api_id, api_hash)
     await client.connect()
     try:
         await client.log_out()
@@ -711,7 +828,8 @@ async def run_trader(cfg):
     trader = Trader(cfg)
     trader.banner()
 
-    client = TelegramClient(SESSION_PATH, TG_API_ID, TG_API_HASH)
+    api_id, api_hash = get_tg_creds()
+    client = TelegramClient(SESSION_PATH, api_id, api_hash)
     await client.start()
     me = await client.get_me()
     print(f"  Најавен како: {me.first_name or ''} (@{me.username or me.phone})\n")
