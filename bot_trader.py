@@ -582,6 +582,28 @@ def setup_wizard():
 # ══════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ══════════════════════════════════════════════════════════════════════════
+async def resolve_channel(client, channel: str):
+    """Find the channel entity. Accepts @name, name, t.me/name or -100... id."""
+    candidates = []
+    ch = channel.strip()
+    candidates.append(ch)
+    if ch.startswith("https://t.me/"):
+        candidates.append(ch.replace("https://t.me/", ""))
+    if ch.startswith("t.me/"):
+        candidates.append(ch.replace("t.me/", ""))
+    if ch.startswith("@"):
+        candidates.append(ch.lstrip("@"))
+    else:
+        candidates.append("@" + ch)
+
+    for c in candidates:
+        try:
+            return await client.get_entity(c)
+        except Exception:
+            continue
+    return None
+
+
 async def run_trader(cfg):
     trader = Trader(cfg)
     trader.banner()
@@ -591,12 +613,40 @@ async def run_trader(cfg):
     me = await client.get_me()
     print(f"  Најавен како: {me.first_name or ''} (@{me.username or me.phone})\n")
 
+    # ── Membership check: only channel members can read signals ──
+    entity = await resolve_channel(client, cfg["channel"])
+    if entity is None:
+        print(f"  ❌ Не можам да го најдам каналот: {cfg['channel']}")
+        print("     Можни причини:")
+        print("       1) Не си член на каналот — приклучи се прво")
+        print("       2) Погрешно име — провери во config.json → \"channel\"")
+        print("       3) Каналот е приватен и немаш пристап")
+        await client.disconnect()
+        return
+
+    title = getattr(entity, "title", None) or str(entity.id)
+    try:
+        await client.get_messages(entity, limit=1)
+        can_read = True
+    except Exception as e:
+        can_read = False
+        print(f"  ⚠️  Не можам да читам пораки: {e}")
+
+    if not can_read:
+        print(f"  ❌ Немаш пристап до „{title}\".")
+        print("     Само членови на каналот можат да читаат сигнали.")
+        print("     Приклучи се на каналот, па пушти ме повторно.")
+        await client.disconnect()
+        return
+
+    print(f"  ✅ Канал: „{title}\" — пристап потврден (член си)\n")
+
     if cfg["mode"] == "live":
         b = trader.ex.balance()
         print(f"  баланс: ${b:.2f}" if b is not None
               else "  ⚠️ не можам да го прочитам балансот (провери API клучеви)")
 
-    @client.on(events.NewMessage(chats=cfg["channel"]))
+    @client.on(events.NewMessage(chats=entity))
     async def handler(event):
         text = event.message.message or ""
         sig = parse_signal(text)
@@ -604,7 +654,7 @@ async def run_trader(cfg):
             trader.on_signal(sig)
             trader.show_status()
 
-    print(f"  👂 Слушам сигнали во {cfg['channel']}... (Ctrl+C за стоп)\n")
+    print(f"  👂 Слушам сигнали во „{title}\"... (Ctrl+C за стоп)\n")
 
     # periodic status
     async def heartbeat():
