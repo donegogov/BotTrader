@@ -48,7 +48,15 @@ except ImportError:
 try:
     from telethon import TelegramClient, events
     from telethon.tl.types import Channel, Chat
-    from telethon.errors import SessionPasswordNeededError
+    from telethon.errors import (
+        SessionPasswordNeededError,
+        PhoneNumberInvalidError,
+        PhoneNumberBannedError,
+        PhoneCodeInvalidError,
+        PhoneCodeExpiredError,
+        FloodWaitError,
+        ApiIdInvalidError,
+    )
 except ImportError:
     print("\n  ❌ Недостасува пакет: telethon")
     print("  Инсталирај:  pip install telethon\n")
@@ -112,6 +120,22 @@ def ask(q, default=""):
 # ══════════════════════════════════════════════════════════════════════════
 #  TELEGRAM LOGIN
 # ══════════════════════════════════════════════════════════════════════════
+def normalize_phone(raw: str) -> str:
+    """Clean a phone number: remove spaces/dashes/brackets, one leading '+'."""
+    s = (raw or "").strip()
+    for ch in (" ", "-", "(", ")", ".", "/", "\t", "\u00a0", "\u2013", "\u2014"):
+        s = s.replace(ch, "")
+    if s.startswith("00"):
+        s = "+" + s[2:]
+    if s and not s.startswith("+"):
+        s = "+" + s
+    return s
+
+
+def phone_looks_valid(p: str) -> bool:
+    return p.startswith("+") and p[1:].isdigit() and 8 <= len(p[1:]) <= 15
+
+
 async def telegram_login():
     """Interactive login with phone + code (saves session file)."""
     print("\n" + "=" * 64)
@@ -119,46 +143,125 @@ async def telegram_login():
     print("=" * 64)
     print("""
   Ќе се најавиш со ТВОЈОТ телефонски број — истиот што го користиш
-  во Telegram апликацијата. Кодот ќе ти дојде во Telegram, не SMS.
+  во Telegram апликацијата.
 
-  ⚠️  Ова е твојот личен акаунт. Програмата само ГИ ЧИТА пораките
-      од каналот. Не праќа ништо, не ги менува твоите контакти.
+  Внеси го бројот СО државен код, на пример:
+      +49 1512 3456789     (Germany)
+      +389 70 123 456      (Macedonia)
+
+  ✔ Празни места и цртички се дозволени — програмата ги брише.
+  ✔ Мора да почнува со '+' .
 """)
-    phone = ask("  Телефонски број (со +389...)", "")
+
+    phone = ""
+    for _ in range(3):
+        raw = ask("  Телефонски број", "")
+        if not raw:
+            print("  ❌ Откажано")
+            return False
+        phone = normalize_phone(raw)
+        if phone_looks_valid(phone):
+            break
+        print(f"\n  ❌ „{raw}\" не е валиден број.")
+        print("     Треба: + и 8-15 цифри. Пример: +4915123456789\n")
+        phone = ""
     if not phone:
-        print("  ❌ Откажано")
         return False
+
+    print(f"\n  📱 Број: {phone}")
+    print("     Ако е погрешен, притисни Ctrl+C сега и почни повторно.\n")
 
     client = TelegramClient(SESSION_PATH, TG_API_ID, TG_API_HASH)
     await client.connect()
 
     if await client.is_user_authorized():
         me = await client.get_me()
-        print(f"\n  ✅ Веќе најавен како: {me.first_name or ''} (@{me.username or me.phone})")
+        print(f"  ✅ Веќе најавен како: {me.first_name or ''} (@{me.username or me.phone})")
         await client.disconnect()
         return True
 
-    try:
-        await client.send_code_request(phone)
-        code = ask("  Код од Telegram", "")
+    # ── Изпрати код ──
+    sent = None
+    for attempt in range(2):
+        try:
+            sent = await client.send_code_request(phone)
+            print("  ✅ Кодот е пратен.")
+            print("     Погледни ја Telegram апликацијата на ТОЈ телефон.")
+            print("     Пораката е од „Telegram\" (не SMS).\n")
+            break
+        except PhoneNumberInvalidError:
+            print(f"\n  ❌ Telegram: бројот „{phone}\" е невалиден.")
+            print("     Провери го државниот код (пр. +49 за Германија).\n")
+            await client.disconnect()
+            return False
+        except PhoneNumberBannedError:
+            print("\n  ❌ Овој број е блокиран во Telegram.\n")
+            await client.disconnect()
+            return False
+        except FloodWaitError as e:
+            print(f"\n  ⏳ Премногу обиди. Почекај {e.seconds} секунди и пушти повторно.\n")
+            await client.disconnect()
+            return False
+        except ApiIdInvalidError:
+            print("\n  ❌ API конфигурацијата е невалидна (api_id/api_hash).\n")
+            await client.disconnect()
+            return False
+        except Exception as e:
+            print(f"\n  ❌ Грешка: {type(e).__name__}: {e}")
+            if attempt == 0:
+                again = ask("  Да пробам повторно? (d/n)", "d")
+                if again.lower() not in ("d", "y", "да", ""):
+                    await client.disconnect()
+                    return False
+                continue
+            await client.disconnect()
+            return False
+
+    # ── Внеси код ──
+    for attempt in range(3):
+        code = ask("  Код од Telegram (5 цифри)", "").strip().replace(" ", "")
         if not code:
             print("  ❌ Откажано")
             await client.disconnect()
             return False
         try:
-            await client.sign_in(phone, code)
+            await client.sign_in(phone=phone, code=code,
+                                 phone_code_hash=sent.phone_code_hash if sent else None)
+            break
         except SessionPasswordNeededError:
-            pwd = ask("  Двофакторска лозинка (2FA)")
-            await client.sign_in(password=pwd)
-
-        me = await client.get_me()
-        print(f"\n  ✅ Најавен како: {me.first_name or ''} (@{me.username or me.phone})")
-        await client.disconnect()
-        return True
-    except Exception as e:
-        print(f"\n  ❌ Најава не успеа: {e}")
+            print("\n  🔐 Имаш двофакторска заштита (2FA).")
+            pwd = ask("  Твојата Telegram лозинка", "")
+            if not pwd:
+                await client.disconnect()
+                return False
+            try:
+                await client.sign_in(password=pwd)
+                break
+            except Exception as e:
+                print(f"\n  ❌ Погрешна лозинка: {e}\n")
+                await client.disconnect()
+                return False
+        except PhoneCodeInvalidError:
+            print(f"\n  ❌ Погрешен код. Обиди {attempt + 1}/3.\n")
+            continue
+        except PhoneCodeExpiredError:
+            print("\n  ❌ Кодот истече. Пушти --login повторно.\n")
+            await client.disconnect()
+            return False
+        except Exception as e:
+            print(f"\n  ❌ {type(e).__name__}: {e}\n")
+            continue
+    else:
         await client.disconnect()
         return False
+
+    try:
+        me = await client.get_me()
+        print(f"\n  ✅ Најавен како: {me.first_name or ''} (@{me.username or me.phone})")
+    except Exception:
+        print("\n  ✅ Најавен.")
+    await client.disconnect()
+    return True
 
 
 async def telegram_logout():
